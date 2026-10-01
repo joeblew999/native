@@ -192,6 +192,27 @@ func TestAppTypeStringCovered(t *testing.T) {
 	}
 }
 
+// TestAppTypeStringBlurred: an app the user switched away from has no focus
+// window, and Chromium has blurred its page. Keys and text must still land
+// (App posts WM_SETFOCUS to Chromium first), and the foreground must not move.
+func TestAppTypeStringBlurred(t *testing.T) {
+	w, app, _, _ := start(t, "-blur")
+	w.Wait(t, 5*time.Second, func(e testwin.Event) bool { return e.Type() == "blurred" })
+	time.Sleep(500 * time.Millisecond)
+	w.Drain()
+	t.Logf("after blur: %v\n%s", w.Seen(), input.Targets(w.PID))
+	err := app.TypeString("é👋")
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Wait(t, landWithin, func(e testwin.Event) bool { return e.Type() == "input" && e.Str("value") == "é👋" })
+	err = app.KeyTap(input.KeyReturn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Wait(t, landWithin, func(e testwin.Event) bool { return e.Type() == "key" && e.Str("key") == "Enter" })
+}
+
 func TestAppNoWindow(t *testing.T) {
 	// PID 4 is the System process, which owns no window.
 	err := input.Target(4).Click(1, 1, input.Left)

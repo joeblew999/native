@@ -61,6 +61,7 @@ var (
 	procAttachThreadInput   = user32.NewProc("AttachThreadInput")
 	procGetWindowThreadPID  = user32.NewProc("GetWindowThreadProcessId")
 	procBringWindowToTop    = user32.NewProc("BringWindowToTop")
+	procSetFocus            = user32.NewProc("SetFocus")
 	procCreateSolidBrush    = gdi32.NewProc("CreateSolidBrush")
 	procDwmGetWindowAttrib  = dwmapi.NewProc("DwmGetWindowAttribute")
 	procSetDisplayAffinity  = user32.NewProc("SetWindowDisplayAffinity")
@@ -157,6 +158,7 @@ func main() {
 	front := flag.Bool("front", false, "take the foreground instead: only for the hwtest_global tests, which drive the real cursor and keyboard and run in a VM")
 	cover := flag.Bool("cover", false, "a second after start, cover the window completely with another opaque window of this process, and report \"covered\"")
 	protect := flag.Bool("protect", false, "exclude the window from capture (SetWindowDisplayAffinity WDA_MONITOR): the negative control for screen's blank-frame check")
+	blur := flag.Bool("blur", false, "half a second after ready, drop this thread's keyboard focus (SetFocus(NULL)), the state an app is in after the user switched away from it")
 	noOcclusion := flag.Bool("no-occlusion", false, "start WebView2 with --disable-features=CalculateNativeWinOcclusion, so a fully covered window is not treated as hidden")
 	life := flag.Duration("timeout", 5*time.Minute, "exit after this long")
 	flag.Parse()
@@ -216,6 +218,15 @@ func main() {
 			w.Focus()
 			emit(v)
 		})
+		if *blur {
+			go func() {
+				time.Sleep(500 * time.Millisecond)
+				w.Dispatch(func() {
+					call(procSetFocus, 0)
+					emit(map[string]any{"type": "blurred"})
+				})
+			}()
+		}
 	})
 	if err != nil {
 		fail(err)

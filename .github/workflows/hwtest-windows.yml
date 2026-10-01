@@ -24,6 +24,7 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go env GOARCH
+      # (Escape is global input, fine on a disposable runner.)
       # The windows-11-arm image comes up with a full-screen "Microsoft account"
       # prompt (WWAHost.exe) in the foreground, over every other window. It
       # makes testwin's window unreachable by WindowFromPoint, so Chromium
@@ -34,6 +35,10 @@ jobs:
         run: |
           Get-Process | Where-Object MainWindowTitle | Format-Table Id, ProcessName, MainWindowTitle -AutoSize
           Get-Process -Name WWAHost -ErrorAction SilentlyContinue | Stop-Process -Force -PassThru | Format-Table Id, ProcessName
+          # With the prompt gone the Start menu is open underneath; Escape
+          # closes it.
+          Start-Sleep -Seconds 2
+          (New-Object -ComObject WScript.Shell).SendKeys('{ESC}')
       - name: hwtest (background input, window capture)
         shell: bash
         env:
