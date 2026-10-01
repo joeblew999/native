@@ -1,0 +1,65 @@
+// Package screen captures windows and the display, cgo-free.
+//
+// CaptureWindow reads one window's own pixels, whether or not it is covered by
+// other windows or sitting in the background, so a program can watch another
+// application without bringing it forward:
+//
+//	img, err := screen.CaptureWindow(windowID)
+//
+// Capture reads a rectangle of the main display as the user sees it.
+//
+// On macOS both need the Screen Recording permission (CaptureAllowed reports
+// it); without it they return ErrNotAllowed. This package never prompts for
+// it. Windows has no such permission.
+//
+// Images come back at the display's pixel resolution, so on a Retina display a
+// 400x300-point window is an 800x600 image. Colours are converted to sRGB.
+//
+// Implemented on macOS through ScreenCaptureKit (macOS 14 or later), and on
+// Windows through GDI (PrintWindow with PW_RENDERFULLCONTENT, BitBlt).
+// Elsewhere every call returns ErrUnsupported.
+package screen
+
+import (
+	"errors"
+	"image"
+)
+
+var (
+	// ErrUnsupported is returned on a platform with no capture backend.
+	ErrUnsupported = errors.New("screen: not supported on this platform")
+	// ErrNotAllowed is returned when the process lacks the Screen Recording
+	// permission. Grant it in System Settings, Privacy & Security, Screen &
+	// System Audio Recording; this package never prompts for it.
+	ErrNotAllowed = errors.New("screen: screen recording permission not granted")
+	// ErrNoWindow is returned by CaptureWindow for an ID that names no window.
+	ErrNoWindow = errors.New("screen: no such window")
+	// ErrBlank is returned by CaptureWindow when the OS handed back an
+	// all-black image instead of the window's content (Windows: a window
+	// protected with SetWindowDisplayAffinity, or content PrintWindow cannot
+	// read). It is returned rather than the black image.
+	ErrBlank = errors.New("screen: capture came back blank")
+)
+
+// CaptureWindow returns the current content of the window with the given ID
+// (a CGWindowID on macOS, an HWND on Windows), frame and title bar included,
+// without its shadow. The window may be covered or in the background, but on
+// Windows not minimised.
+func CaptureWindow(windowID uint32) (*image.RGBA, error) { return captureWindow(windowID) }
+
+// Capture returns rectangle r of the main display, in points from its top-left
+// corner, as currently shown. r is clipped to the display.
+func Capture(r image.Rectangle) (*image.RGBA, error) {
+	if r.Empty() {
+		return nil, errors.New("screen: empty rectangle")
+	}
+	return capture(r)
+}
+
+// Size returns the main display's size in points.
+func Size() (w, h int, err error) { return size() }
+
+// CaptureAllowed reports whether this process holds the Screen Recording
+// permission. It never prompts. On Windows, which has no such permission, it
+// returns true. On a platform with no backend it returns false.
+func CaptureAllowed() bool { return captureAllowed() }

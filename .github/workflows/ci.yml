@@ -94,6 +94,21 @@ jobs:
           grep -q '^alert 2: typed-by-ci' /tmp/alert-out.txt
         timeout-minutes: 5
 
+  # Struct-by-value differs between arm64 and amd64 and never shows up in a
+  # cross-compile (README "ABI discipline"). These tests round-trip CGPoint
+  # and CGRect through CoreGraphics and objc_msgSend(_stret) on an Intel Mac;
+  # they post and capture nothing.
+  abi-darwin-amd64:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go env GOARCH
+      - run: go test -count 1 -v -run 'ByValue|TestRGBA|TestScrollEventFields' ./input ./screen
+        timeout-minutes: 5
+
   cross:
     runs-on: ubuntu-latest
     steps:
