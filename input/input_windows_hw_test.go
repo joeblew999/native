@@ -61,7 +61,7 @@ func TestAppKeyTap(t *testing.T) {
 		t.Logf("KeyTap attempt %d landed: %v", try, ok)
 	}
 	if !ok {
-		t.Fatalf("no key event; saw %v", w.Seen())
+		t.Fatalf("no key event; saw %v\n%s", w.Seen(), input.Targets(w.PID))
 	}
 	if e.Str("key") != "a" || e.Str("code") != "KeyA" {
 		t.Errorf("got key %q code %q, want a / KeyA", e.Str("key"), e.Str("code"))
@@ -164,6 +164,32 @@ func TestAppScrollCovered(t *testing.T) {
 		return
 	}
 	t.Log("wheel did not land in the covered window (expected for Chromium)")
+}
+
+// TestAppTypeStringCovered records whether text reaches a WebView2 window
+// that another window covers completely, with WebView2's native occlusion
+// tracking on (the default) and off.
+func TestAppTypeStringCovered(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		flags []string
+	}{
+		{"default", []string{"-cover"}},
+		{"no-occlusion", []string{"-cover", "-no-occlusion"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w, app, _, _ := start(t, tc.flags...)
+			w.Wait(t, 10*time.Second, func(e testwin.Event) bool { return e.Type() == "covered" })
+			time.Sleep(time.Second)
+			w.Drain()
+			err := app.TypeString("x")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, ok := w.Next(2*time.Second, func(e testwin.Event) bool { return e.Type() == "input" })
+			t.Logf("covered, %s: text landed %v; events %v\n%s", tc.name, ok, w.Seen(), input.Targets(w.PID))
+		})
+	}
 }
 
 func TestAppNoWindow(t *testing.T) {

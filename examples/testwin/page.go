@@ -66,10 +66,17 @@ html,body{margin:0;height:100%;background:#ffffff;font:14px -apple-system,sans-s
   document.addEventListener('wheel', function(e){
     report({type:'wheel', dx:e.deltaX, dy:e.deltaY});
   }, {capture:true, passive:true});
+  // Visibility and focus as the engine sees them: WebView2 hides a page whose
+  // window is fully covered, and the key tests need to know.
+  document.addEventListener('visibilitychange', function(){
+    report({type:'visibility', state:document.visibilityState});
+  });
+  window.addEventListener('focus', function(){ report({type:'focus', focused:true}); });
+  window.addEventListener('blur', function(){ report({type:'focus', focused:false}); });
   field.focus();
   // Not requestAnimationFrame: WebKit stops it for an occluded window, and
   // this one sits behind everything. The capture test waits for the swatch.
-  setTimeout(function(){ report({type:'ready'}); }, 100);
+  setTimeout(function(){ report({type:'ready', visibility:document.visibilityState, focused:document.hasFocus()}); }, 100);
 })();
 </script></body></html>`
 

@@ -5,12 +5,31 @@ package input
 import (
 	"fmt"
 	"syscall"
+	"unsafe"
 )
 
 // GWL_EXSTYLE is -20; GetWindowLongW takes it as an int.
 const gwHwndPrev = 3
 
-var procGetWindowLongW = syscall.NewLazyDLL("user32.dll").NewProc("GetWindowLongW")
+var (
+	procGetWindowLongW      = syscall.NewLazyDLL("user32.dll").NewProc("GetWindowLongW")
+	procGetWindowTextW      = syscall.NewLazyDLL("user32.dll").NewProc("GetWindowTextW")
+	procGetForegroundWindow = syscall.NewLazyDLL("user32.dll").NewProc("GetForegroundWindow")
+)
+
+func title(h uintptr) string {
+	var buf [256]uint16
+	n := call(procGetWindowTextW, h, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	return syscall.UTF16ToString(buf[:n])
+}
+
+// cloaked reads DWMWA_CLOAKED (14): a cloaked window is "visible" to user32
+// but not drawn.
+func cloaked(h uintptr) uint32 {
+	var v uint32
+	call(procDwmGetWindowAttribute, h, 14, uintptr(unsafe.Pointer(&v)), 4)
+	return v
+}
 
 // Targets describes the windows the App methods would post to for pid: the
 // top-level window, the keyboard target and the mouse target at the window's
@@ -38,14 +57,19 @@ func Targets(pid int) string {
 	}
 	walk(top, 1)
 	cx, cy := (r.Left+r.Right)/2, (r.Top+r.Bottom)/2
-	s += fmt.Sprintf("\nWindowFromPoint(centre) = %s, root %s", d(windowFromPoint(cx, cy)), d(call(procGetAncestor, windowFromPoint(cx, cy), gaRoot)))
+	under := windowFromPoint(cx, cy)
+	s += fmt.Sprintf("\nWindowFromPoint(centre) = %s, root %s %q cloaked=%v", d(under), d(call(procGetAncestor, under, gaRoot)), title(under), cloaked(call(procGetAncestor, under, gaRoot)))
+	_, tid := windowPID(top)
+	gi := guiThreadInfo{cbSize: uint32(unsafe.Sizeof(guiThreadInfo{}))}
+	call(procGetGUIThreadInfo, uintptr(tid), uintptr(unsafe.Pointer(&gi)))
+	s += fmt.Sprintf("\ntarget GUI thread: active %s, focus %s; foreground %s", d(gi.hwndActive), d(gi.hwndFocus), d(call(procGetForegroundWindow)))
 	s += "\nvisible windows above it:"
 	for h := call(procGetWindow, top, gwHwndPrev); h != 0; h = call(procGetWindow, h, gwHwndPrev) {
 		if call(procIsWindowVisible, h) == 0 {
 			continue
 		}
 		wr, _ := windowRect(h)
-		s += fmt.Sprintf("\n  %s rect=%v exstyle=%#x", d(h), wr, call(procGetWindowLongW, h, uintptr(^uint32(0)-19)))
+		s += fmt.Sprintf("\n  %s %q rect=%v exstyle=%#x cloaked=%v", d(h), title(h), wr, call(procGetWindowLongW, h, uintptr(^uint32(0)-19)), cloaked(h))
 	}
 	return s
 }

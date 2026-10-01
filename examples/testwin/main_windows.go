@@ -157,9 +157,17 @@ func main() {
 	front := flag.Bool("front", false, "take the foreground instead: only for the hwtest_global tests, which drive the real cursor and keyboard and run in a VM")
 	cover := flag.Bool("cover", false, "a second after start, cover the window completely with another opaque window of this process, and report \"covered\"")
 	protect := flag.Bool("protect", false, "exclude the window from capture (SetWindowDisplayAffinity WDA_MONITOR): the negative control for screen's blank-frame check")
+	noOcclusion := flag.Bool("no-occlusion", false, "start WebView2 with --disable-features=CalculateNativeWinOcclusion, so a fully covered window is not treated as hidden")
 	life := flag.Duration("timeout", 5*time.Minute, "exit after this long")
 	flag.Parse()
 	exitWithParent(*life)
+	if *noOcclusion {
+		// WebView2 reads extra browser flags from the environment.
+		err := os.Setenv("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disable-features=CalculateNativeWinOcclusion")
+		if err != nil {
+			fail(err)
+		}
+	}
 
 	// White, as the page: the class brush is what shows before WebView2 draws.
 	cls := register("native-testwin", call(procCreateSolidBrush, 0xffffff))
