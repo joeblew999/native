@@ -82,8 +82,9 @@ interactive desktop session with WebView2 installed), against the same
   management). `PW_RENDERFULLCONTENT` is what makes it work: it asks DWM for
   the composed content, DirectComposition included, which is how WebView2
   draws. Windows.Graphics.Capture was not needed.
-- **Covered**: with another window fully over testwin, text typed into it in
-  the background turns the swatch cyan and `CaptureWindow` shows the cyan.
+- **Covered**: with another window fully over testwin, a background click on
+  its button turns the swatch cyan and `CaptureWindow` shows the cyan: live
+  content, not a stale buffer.
 - **Black frames are detected, not returned.** A window with
   `SetWindowDisplayAffinity(WDA_MONITOR)` (what [`nocapture`](../nocapture)
   does) comes back from `PrintWindow` as an all-black bitmap with success;

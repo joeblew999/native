@@ -157,7 +157,7 @@ to the render widget itself are dropped.
 | `KeyTap` | ✅ yes, **while the page has focus** | `keydown` with the right `key` and `code` (letters, Return); the scan code from `MapVirtualKeyW` gives `code` |
 | `KeyTap` with modifiers | ⚠️ the key lands, the modifier does not | Shift+B arrives as `b` with no modifiers: Chromium reads modifiers from the keyboard state (`GetKeyState`), which a posted message cannot set |
 | `TypeString` | ✅ yes, **while the page has focus** | `héllo, wörld 👋 日本` arrives intact: one `WM_CHAR` per UTF-16 unit, a surrogate pair as two consecutive messages, as Windows itself sends them |
-| `Click`, left and right | ✅ yes | `mousedown`/`mouseup`/`click` (`contextmenu` for right) at the exact page point; also lands when another window covers testwin (measured under the arm image's full-screen sign-in prompt) |
+| `Click`, left and right | ✅ yes, **see the activation caveat** | `mousedown`/`mouseup`/`click` (`contextmenu` for right) at the exact page point; also lands when another window covers testwin (measured under the arm image's full-screen sign-in prompt) |
 | `Scroll`, vertical and horizontal | ✅ yes, **where some of the window shows** | `wheel` with the right signs. Chromium routes a wheel message by the window under its point (`WindowFromPoint`) and drops it when that window belongs to another process, so `Scroll` puts the point on an exposed part of the window (the centre if it shows). Fully covered: dropped |
 | keys/text into a fully covered window | ✅ yes | covering does not matter, with or without WebView2's native occlusion tracking |
 
@@ -167,17 +167,29 @@ exactly that state (deactivation takes the thread's focus), and so, measured,
 is a WebView2 app that started cold in a window that was never activated.
 Posting a fake `WM_SETFOCUS` to Chromium does nothing (tried). What works is a
 background `Click` on the field: Chromium takes focus inside its own window on
-the mouse-down, the page is focused again, and text lands; the foreground
-window does not change (`TestAppTypeStringBlurred`). This package does not do
-that click for you: where to click is the caller's call.
+the mouse-down, the page is focused again, and text lands
+(`TestAppTypeStringBlurred`). This package does not do that click for you:
+where to click is the caller's call, and it has a cost:
 
-**Activation, a glaze start-up note.** Started without
-`WS_EX_NOACTIVATE`, testwin took the foreground on the `windows-latest`
-runner during glaze's start-up (glaze shows the window with `SW_SHOW` and
-moves focus into WebView2, which activates the window), even though testwin
-itself showed it with `SW_SHOWNOACTIVATE`. On the arm runner the foreground
-lock refused it. testwin now uses `WS_EX_NOACTIVATE`; an app embedding glaze
-that must start in the background needs the same.
+**Activation caveat.** Chromium's mouse-down handler focuses its window, and
+focusing a child activates the top-level window. With an ordinary
+(activatable) testwin window, that background click made testwin the
+foreground window on both runners, where nothing holds the foreground lock.
+On a desktop the user is actively using, Windows' foreground lock normally
+refuses a background process the foreground (it flashes the taskbar button
+instead), but that was not measured here. So a background click into a
+WebView2 app can bring it forward. testwin avoids it with `WS_EX_NOACTIVATE`
+(the counterpart of the macOS testwin's Prohibited activation policy): with
+it, no test ever changed the foreground, and the page's focus, once
+Chromium takes it, sometimes drops again, so the keyboard tests give the page
+focus and retry, and log the attempt that landed (on the final runs, the first
+attempt, every time).
+
+**glaze start-up.** For the same reason, testwin without `WS_EX_NOACTIVATE`
+took the foreground on the `windows-latest` runner during glaze's start-up
+(glaze shows the window with `SW_SHOW` and moves focus into WebView2), even
+though testwin itself showed it with `SW_SHOWNOACTIVATE`. An app embedding
+glaze that must start in the background needs `WS_EX_NOACTIVATE` too.
 
 Coordinates for `Click` are pixels from the top-left of the frame DWM draws
 (`DWMWA_EXTENDED_FRAME_BOUNDS`, without the invisible resize borders), title

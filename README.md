@@ -64,8 +64,8 @@ Status: ✅ done · 🚧 in progress · ⬜ planned · 🟦 lives in
 | [`power`](power/) | Keep the system awake (inhibit idle sleep)      | IOKit assertion | SetThreadExecutionState | — (needs D-Bus) | ✅ |
 | [`alert`](alert/) | Modal alert: message, buttons, optional text field | NSAlert | — | GtkDialog | 🚧 |
 | [`pointer`](pointer/) | Pointer events GLFW toolkits drop (trackpad pinch) | local NSEvent monitor | — | — | 🚧 |
-| [`input`](input/) | Synthesize keys, text, clicks, scroll: per app in the background, or global | CGEventPostToPid / CGEventPost | — | — | 🚧 |
-| [`screen`](screen/) | Capture one window (even covered) or the display | ScreenCaptureKit | — | — | 🚧 |
+| [`input`](input/) | Synthesize keys, text, clicks, scroll: per app in the background, or global | CGEventPostToPid / CGEventPost | PostMessage / SendInput | — | 🚧 |
+| [`screen`](screen/) | Capture one window (even covered) or the display | ScreenCaptureKit | PrintWindow / BitBlt | — | 🚧 |
 | [`nocapture`](nocapture/) | Black out a window in screenshots/recordings | — (Apple removed the API) | SetWindowDisplayAffinity | — (no compositor API) | ✅ |
 
 ### Lives in glaze, not here
