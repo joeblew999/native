@@ -1,0 +1,48 @@
+# The input and screen backends on a real Windows desktop. GitHub's hosted
+# Windows runners run the job in an interactive session with a desktop, and
+# WebView2 is installed, so examples/testwin (a glaze window) opens for real.
+#
+# hwtest is the background half: testwin is never activated, and the tests
+# check that the foreground window and the cursor are left alone.
+# hwtest_global moves the real cursor and types into the foreground window;
+# a disposable runner is exactly where that may run, so it runs here too.
+name: hwtest-windows
+
+on: [push, pull_request, workflow_dispatch]
+
+jobs:
+  hwtest:
+    name: hwtest-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go env GOARCH
+      - name: hwtest (background input, window capture)
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+          SCREEN_KEEP: ${{ runner.temp }}/captures
+        run: |
+          mkdir -p "$SCREEN_KEEP"
+          go test -tags hwtest -count 1 -v -timeout 5m ./input ./screen
+        timeout-minutes: 10
+      - name: hwtest_global (real cursor and keyboard)
+        if: always()
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: go test -tags hwtest_global -count 1 -v -timeout 5m -run Global ./input ./screen
+        timeout-minutes: 10
+      - uses: actions/upload-artifact@v7.0.1
+        if: always()
+        with:
+          name: captures-${{ matrix.os }}
+          path: ${{ runner.temp }}/captures
+          if-no-files-found: ignore

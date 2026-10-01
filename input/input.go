@@ -19,12 +19,15 @@
 //     app.TypeString("héllo 👋")
 //     app.Click(40, 60, input.Left)
 //
-// Both halves need the Accessibility permission (Trusted reports it); without
-// it they return ErrNotTrusted rather than posting events the OS would drop in
-// silence.
+// On macOS both halves need the Accessibility permission (Trusted reports
+// it); without it they return ErrNotTrusted rather than posting events the OS
+// would drop in silence. Windows has no such permission; an event aimed at a
+// process running at a higher integrity level fails with ErrNotTrusted.
 //
 // Implemented on macOS through Quartz Event Services (CGEventPostToPid and
-// CGEventPost). Elsewhere every call returns ErrUnsupported.
+// CGEventPost), and on Windows through window messages posted to the target's
+// windows (per application) and SendInput (global). Elsewhere every call
+// returns ErrUnsupported.
 package input
 
 import "errors"
@@ -36,8 +39,9 @@ var (
 	// permission that posting events needs. Grant it in System Settings,
 	// Privacy & Security, Accessibility; this package never prompts for it.
 	ErrNotTrusted = errors.New("input: accessibility permission not granted")
-	// ErrNoWindow is returned by a window-relative App method when the target
-	// process has no on-screen window.
+	// ErrNoWindow is returned by an App method that needs the target's window
+	// (the mouse methods on macOS, every method on Windows, where messages go
+	// to a window) when the target process has no on-screen window.
 	ErrNoWindow = errors.New("input: target has no on-screen window")
 	// ErrUnknownKey is returned for a Key or Button value this package does
 	// not define.
@@ -135,8 +139,8 @@ const (
 )
 
 // Trusted reports whether this process holds the Accessibility permission
-// that posting events needs. It never prompts. On a platform with no backend
-// it returns false.
+// that posting events needs. It never prompts. On Windows, which has no such
+// permission, it returns true. On a platform with no backend it returns false.
 func Trusted() bool { return trusted() }
 
 // App is one target application. Its methods deliver events to that process

@@ -18,7 +18,7 @@ import (
 )
 
 func main() {
-	id := flag.Uint("window", 0, "window ID (CGWindowID) to capture (0: just report)")
+	id := flag.Uint("window", 0, "window ID to capture: a CGWindowID on macOS, an HWND on Windows (0: just report)")
 	out := flag.String("o", "window.png", "where to write the capture")
 	flag.Parse()
 

@@ -1,4 +1,4 @@
-//go:build (hwtest || hwtest_global) && darwin
+//go:build (hwtest || hwtest_global) && (darwin || windows)
 
 package screen_test
 

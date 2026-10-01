@@ -1,7 +1,6 @@
-//go:build !darwin
+//go:build !darwin && !windows
 
-// testwin is macOS-only for now: the input and screen backends it exercises
-// are macOS-only.
+// testwin exists where the input and screen backends do: macOS and Windows.
 package main
 
 import (
@@ -10,6 +9,6 @@ import (
 )
 
 func main() {
-	fmt.Fprintln(os.Stderr, "testwin: macOS only")
+	fmt.Fprintln(os.Stderr, "testwin: macOS and Windows only")
 	os.Exit(1)
 }

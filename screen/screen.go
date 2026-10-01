@@ -8,13 +8,15 @@
 //
 // Capture reads a rectangle of the main display as the user sees it.
 //
-// Both need the Screen Recording permission (CaptureAllowed reports it);
-// without it they return ErrNotAllowed. This package never prompts for it.
+// On macOS both need the Screen Recording permission (CaptureAllowed reports
+// it); without it they return ErrNotAllowed. This package never prompts for
+// it. Windows has no such permission.
 //
 // Images come back at the display's pixel resolution, so on a Retina display a
 // 400x300-point window is an 800x600 image. Colours are converted to sRGB.
 //
-// Implemented on macOS through ScreenCaptureKit (macOS 14 or later).
+// Implemented on macOS through ScreenCaptureKit (macOS 14 or later), and on
+// Windows through GDI (PrintWindow with PW_RENDERFULLCONTENT, BitBlt).
 // Elsewhere every call returns ErrUnsupported.
 package screen
 
@@ -32,11 +34,17 @@ var (
 	ErrNotAllowed = errors.New("screen: screen recording permission not granted")
 	// ErrNoWindow is returned by CaptureWindow for an ID that names no window.
 	ErrNoWindow = errors.New("screen: no such window")
+	// ErrBlank is returned by CaptureWindow when the OS handed back an
+	// all-black image instead of the window's content (Windows: a window
+	// protected with SetWindowDisplayAffinity, or content PrintWindow cannot
+	// read). It is returned rather than the black image.
+	ErrBlank = errors.New("screen: capture came back blank")
 )
 
 // CaptureWindow returns the current content of the window with the given ID
-// (a CGWindowID on macOS), frame and title bar included, without its shadow.
-// The window may be covered or in the background.
+// (a CGWindowID on macOS, an HWND on Windows), frame and title bar included,
+// without its shadow. The window may be covered or in the background, but on
+// Windows not minimised.
 func CaptureWindow(windowID uint32) (*image.RGBA, error) { return captureWindow(windowID) }
 
 // Capture returns rectangle r of the main display, in points from its top-left
@@ -52,5 +60,6 @@ func Capture(r image.Rectangle) (*image.RGBA, error) {
 func Size() (w, h int, err error) { return size() }
 
 // CaptureAllowed reports whether this process holds the Screen Recording
-// permission. It never prompts. On a platform with no backend it returns false.
+// permission. It never prompts. On Windows, which has no such permission, it
+// returns true. On a platform with no backend it returns false.
 func CaptureAllowed() bool { return captureAllowed() }

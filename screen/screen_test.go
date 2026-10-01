@@ -29,8 +29,8 @@ func TestCaptureEmptyRect(t *testing.T) {
 }
 
 func TestUnsupported(t *testing.T) {
-	if runtime.GOOS == "darwin" {
-		t.Skip("darwin has a backend")
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		t.Skip(runtime.GOOS, "has a backend")
 	}
 	_, err := CaptureWindow(1)
 	if !errors.Is(err, ErrUnsupported) {

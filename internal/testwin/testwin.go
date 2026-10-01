@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -55,12 +54,15 @@ type Win struct {
 // the test ends.
 func Start(t *testing.T, x, y int, flags ...string) *Win {
 	t.Helper()
-	if runtime.GOOS != "darwin" {
-		t.Skip("testwin is macOS-only")
+	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
+		t.Skip("testwin runs on macOS and Windows only")
 	}
 	_, file, _, _ := runtime.Caller(0)
 	dir := filepath.Join(filepath.Dir(file), "..", "..", "examples", "testwin")
 	bin := filepath.Join(t.TempDir(), "testwin")
+	if runtime.GOOS == "windows" {
+		bin += ".exe"
+	}
 	build := exec.Command("go", "build", "-o", bin, ".")
 	build.Dir = dir
 	build.Env = append(os.Environ(), "CGO_ENABLED=0")
@@ -160,16 +162,4 @@ func (w *Win) Seen() []Event {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return append([]Event(nil), w.seen...)
-}
-
-// Frontmost names the frontmost application, the thing these tests promise
-// never to change.
-func Frontmost(t *testing.T) string {
-	t.Helper()
-	out, err := exec.Command("osascript", "-e",
-		`tell application "System Events" to get name of first application process whose frontmost is true`).Output()
-	if err != nil {
-		t.Fatalf("osascript: %v", err)
-	}
-	return strings.TrimSpace(string(out))
 }

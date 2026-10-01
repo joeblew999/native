@@ -1,4 +1,4 @@
-//go:build !darwin
+//go:build !darwin && !windows
 
 // Fallback for platforms without an input backend yet. Keeps the module
 // building for every GOOS; every call fails with ErrUnsupported.
