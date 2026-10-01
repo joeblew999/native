@@ -35,6 +35,7 @@ var (
 	procGetGUIThreadInfo         = user32.NewProc("GetGUIThreadInfo")
 	procGetClassNameW            = user32.NewProc("GetClassNameW")
 	procGetAncestor              = user32.NewProc("GetAncestor")
+	procWindowFromPoint          = user32.NewProc("WindowFromPoint")
 	procMapVirtualKeyW           = user32.NewProc("MapVirtualKeyW")
 	procSendInput                = user32.NewProc("SendInput")
 	procSetCursorPos             = user32.NewProc("SetCursorPos")
@@ -66,6 +67,7 @@ const (
 	wheelDelta = 120
 
 	gwOwner       = 4
+	gaParent      = 1
 	gaRoot        = 2
 	mapvkVKToVSC  = 0
 	dwmwaExtFrame = 9 // DWMWA_EXTENDED_FRAME_BOUNDS
@@ -272,21 +274,63 @@ func findClass(hwnd uintptr, class string) uintptr {
 const renderWidgetClass = "Chrome_RenderWidgetHostHWND"
 
 // keyWindow picks the window keyboard messages go to: the window the target's
-// GUI thread has focused, if it is part of the target window's tree (for a
-// WebView2 host this is the browser process's render widget, whose thread
-// input is attached to the host's); else the Chromium render widget, if any;
+// GUI thread has focused, if it is a descendant of the target window (for a
+// WebView2 host that is Chromium's Chrome_WidgetWin_1 in the browser process,
+// whose thread input is attached to the host's); else the parent of the
+// Chromium render widget, which is the same window before focus has settled;
 // else the top-level window itself. Reading the focus changes nothing.
+//
+// Measured: keys posted to Chrome_RenderWidgetHostHWND itself are dropped;
+// Chrome_WidgetWin_1 takes them.
 func keyWindow(top uintptr) uintptr {
 	_, tid := windowPID(top)
 	gi := guiThreadInfo{cbSize: uint32(unsafe.Sizeof(guiThreadInfo{}))}
 	if call(procGetGUIThreadInfo, uintptr(tid), uintptr(unsafe.Pointer(&gi))) != 0 &&
-		gi.hwndFocus != 0 && call(procGetAncestor, gi.hwndFocus, gaRoot) == top {
+		gi.hwndFocus != 0 && gi.hwndFocus != top && call(procGetAncestor, gi.hwndFocus, gaRoot) == top {
 		return gi.hwndFocus
 	}
 	if h := findClass(top, renderWidgetClass); h != 0 {
-		return h
+		return call(procGetAncestor, h, gaParent)
 	}
 	return top
+}
+
+// windowFromPoint wraps WindowFromPoint, which takes a POINT by value. POINT
+// is 8 bytes, which both Win64 conventions pass in one integer register (rcx
+// on amd64, x0 on arm64) with x in the low half, so packing it into a uintptr
+// is the same bits on both; on 386 it is two stack slots, x first.
+func windowFromPoint(x, y int32) uintptr {
+	if unsafe.Sizeof(uintptr(0)) == 4 {
+		return call(procWindowFromPoint, uintptr(uint32(x)), uintptr(uint32(y))) // #nosec G115 -- bits of a signed coordinate
+	}
+	return call(procWindowFromPoint, uintptr(uint64(uint32(x))|uint64(uint32(y))<<32)) // #nosec G115 -- as above
+}
+
+// exposedPoint returns a point of the target window's content that is not
+// under another window: the centre if that shows, else the first exposed
+// point of a grid over the frame. ok is false when the window is entirely
+// covered. Chromium routes a wheel message by the window under its point and
+// drops it when that window belongs to someone else, so the point matters.
+func exposedPoint(top uintptr, r rect) (x, y int32, ok bool) {
+	cx, cy := (r.Left+r.Right)/2, (r.Top+r.Bottom)/2
+	shows := func(x, y int32) bool {
+		h := windowFromPoint(x, y)
+		return h != 0 && h != top && call(procGetAncestor, h, gaRoot) == top
+	}
+	if shows(cx, cy) {
+		return cx, cy, true
+	}
+	const n = 8
+	for i := 1; i < n; i++ {
+		for j := 1; j < n; j++ {
+			x := r.Left + (r.Right-r.Left)*int32(j)/n // #nosec G115 -- small grid
+			y := r.Top + (r.Bottom-r.Top)*int32(i)/n  // #nosec G115 -- small grid
+			if shows(x, y) {
+				return x, y, true
+			}
+		}
+	}
+	return cx, cy, false
 }
 
 func toClient(hwnd uintptr, x, y int32) point {
@@ -354,7 +398,9 @@ func (a *App) scroll(dx, dy int) error {
 	if err != nil {
 		return err
 	}
-	cx, cy := (r.Left+r.Right)/2, (r.Top+r.Bottom)/2
+	// Fully covered, the centre is posted anyway: an app that does not route
+	// by WindowFromPoint still scrolls, Chromium drops it (see the README).
+	cx, cy, _ := exposedPoint(top, r)
 	h := childAt(top, cx, cy)
 	// The wheel messages carry screen coordinates, unlike the button ones.
 	lp := makeLParam(cx, cy)

@@ -2,11 +2,16 @@
 // process creates itself and hands to glaze, so it controls how the window is
 // shown.
 //
-// By default it never takes the foreground. The window is shown with
-// SW_SHOWNOACTIVATE at the bottom of the Z order, before glaze sees it, so
-// glaze's own ShowWindow finds it already visible and does not activate it.
-// Whatever the user (or the CI session) had in front stays in front. -front
-// reverses that for the hwtest_global tests.
+// By default it never takes the foreground. The window has WS_EX_NOACTIVATE
+// and is shown with SW_SHOWNOACTIVATE before glaze sees it: without the
+// extended style, glaze's start-up (ShowWindow(SW_SHOW), then MoveFocus,
+// which makes WebView2 call SetFocus and so activate the top-level window)
+// took the foreground on GitHub's windows-latest runner. It is shown on top of
+// the Z order, not behind everything as on macOS, because Chromium drops a
+// wheel event whose point is over another process's window; -cover hides it
+// for the tests that want it hidden. Whatever the user (or the CI session)
+// had in front stays in front. -front reverses all that for the
+// hwtest_global tests.
 //
 // The window's class uses DefWindowProcW directly as its window procedure
 // (glaze subclasses it for what it needs), so no Go callback is handed to
@@ -52,6 +57,10 @@ var (
 	procGetWindowRect       = user32.NewProc("GetWindowRect")
 	procLoadCursorW         = user32.NewProc("LoadCursorW")
 	procGetModuleHandleW    = kernel32.NewProc("GetModuleHandleW")
+	procGetCurrentThreadId  = kernel32.NewProc("GetCurrentThreadId")
+	procAttachThreadInput   = user32.NewProc("AttachThreadInput")
+	procGetWindowThreadPID  = user32.NewProc("GetWindowThreadProcessId")
+	procBringWindowToTop    = user32.NewProc("BringWindowToTop")
 	procCreateSolidBrush    = gdi32.NewProc("CreateSolidBrush")
 	procDwmGetWindowAttrib  = dwmapi.NewProc("DwmGetWindowAttribute")
 	procSetDisplayAffinity  = user32.NewProc("SetWindowDisplayAffinity")
@@ -73,8 +82,6 @@ const (
 	swpNoMove     = 0x0002
 	swpNoActivate = 0x0010
 	swpShowWindow = 0x0040
-
-	hwndBottom = 1
 
 	gwHwndPrev = 3
 
@@ -157,20 +164,22 @@ func main() {
 	// White, as the page: the class brush is what shows before WebView2 draws.
 	cls := register("native-testwin", call(procCreateSolidBrush, 0xffffff))
 	style := uintptr(wsOverlapped | wsCaption | wsSysMenu)
+	exStyle := uintptr(wsExNoActivate)
+	if *front {
+		exStyle = 0
+	}
 	r := rect{0, 0, winW, winH}
-	call(procAdjustWindowRectEx, uintptr(unsafe.Pointer(&r)), style, 0, 0)
-	hwnd := call(procCreateWindowExW, 0, uintptr(unsafe.Pointer(cls)), uintptr(unsafe.Pointer(u16("native testwin"))),
+	call(procAdjustWindowRectEx, uintptr(unsafe.Pointer(&r)), style, 0, exStyle)
+	hwnd := call(procCreateWindowExW, exStyle, uintptr(unsafe.Pointer(cls)), uintptr(unsafe.Pointer(u16("native testwin"))),
 		style, uintptr(*x), uintptr(*y), uintptr(r.Right-r.Left), uintptr(r.Bottom-r.Top),
 		0, 0, call(procGetModuleHandleW, 0), 0)
 	if hwnd == 0 {
 		fail(fmt.Errorf("CreateWindowExW failed"))
 	}
 	if *front {
-		call(procShowWindow, hwnd, swShow)
-		call(procSetForegroundWindow, hwnd)
+		takeForeground(hwnd)
 	} else {
 		call(procShowWindow, hwnd, swShowNoActivate)
-		call(procSetWindowPos, hwnd, hwndBottom, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate)
 	}
 
 	if *protect && call(procSetDisplayAffinity, hwnd, wdaMonitor) == 0 {
@@ -211,6 +220,23 @@ func main() {
 		w.Dispatch(func() { emit(state("covered", hwnd)) })
 	}()
 	w.Run()
+}
+
+// takeForeground brings hwnd to the front for the global tests. Windows
+// refuses SetForegroundWindow to a process that is not already in front
+// (measured on the windows-11-arm runner); attaching to the foreground
+// thread's input state for the call is the documented way past that.
+func takeForeground(hwnd uintptr) {
+	call(procShowWindow, hwnd, swShow)
+	fg := call(procGetForegroundWindow)
+	self := call(procGetCurrentThreadId)
+	other := call(procGetWindowThreadPID, fg, 0)
+	if fg != 0 && other != self {
+		call(procAttachThreadInput, self, other, 1)
+		defer call(procAttachThreadInput, self, other, 0)
+	}
+	call(procBringWindowToTop, hwnd)
+	call(procSetForegroundWindow, hwnd)
 }
 
 func state(typ string, hwnd uintptr) map[string]any {

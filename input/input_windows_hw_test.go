@@ -20,14 +20,14 @@ import (
 
 const landWithin = 3 * time.Second
 
-func start(t *testing.T) (*testwin.Win, *input.App, int, int) {
+func start(t *testing.T, flags ...string) (*testwin.Win, *input.App, int, int) {
 	t.Helper()
 	front := testwin.Frontmost(t)
 	x, y, err := input.MousePosition()
 	if err != nil {
 		t.Fatal(err)
 	}
-	w := testwin.Start(t, 120, 140)
+	w := testwin.Start(t, 120, 140, flags...)
 	t.Cleanup(func() {
 		if after := testwin.Frontmost(t); after != front {
 			t.Errorf("foreground window changed: %s -> %s", front, after)
@@ -137,6 +137,25 @@ func TestAppScroll(t *testing.T) {
 	if e.Num("dx") >= 0 {
 		t.Errorf("scroll left arrived as deltaX %v, want < 0", e.Num("dx"))
 	}
+}
+
+// TestAppScrollCovered records what happens to a wheel event aimed at a
+// WebView2 window that another window covers completely: Chromium routes
+// wheel messages by WindowFromPoint and drops one whose point is over another
+// process's window, so nothing is expected to arrive.
+func TestAppScrollCovered(t *testing.T) {
+	w, app, _, _ := start(t, "-cover")
+	w.Wait(t, 10*time.Second, func(e testwin.Event) bool { return e.Type() == "covered" })
+	w.Drain()
+	err := app.Scroll(0, -3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e, ok := w.Next(1500*time.Millisecond, func(e testwin.Event) bool { return e.Type() == "wheel" }); ok {
+		t.Logf("wheel landed in the covered window: %v", e)
+		return
+	}
+	t.Log("wheel did not land in the covered window (expected for Chromium)")
 }
 
 func TestAppNoWindow(t *testing.T) {

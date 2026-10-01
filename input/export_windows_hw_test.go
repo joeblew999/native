@@ -17,7 +17,9 @@ func Targets(pid int) string {
 		p, _ := windowPID(h)
 		return fmt.Sprintf("%#x %s (pid %d)", h, className(h), p)
 	}
-	s := fmt.Sprintf("top %s frame %v\nkeys -> %s\nmouse -> %s\ntree:", d(top), r, d(keyWindow(top)), d(childAt(top, (r.Left+r.Right)/2, (r.Top+r.Bottom)/2)))
+	ex, ey, shows := exposedPoint(top, r)
+	s := fmt.Sprintf("top %s frame %v\nkeys -> %s\nmouse -> %s\nwheel point (%d,%d) exposed=%v\ntree:",
+		d(top), r, d(keyWindow(top)), d(childAt(top, (r.Left+r.Right)/2, (r.Top+r.Bottom)/2)), ex, ey, shows)
 	var walk func(h uintptr, depth int)
 	walk = func(h uintptr, depth int) {
 		for _, c := range children(h) {
