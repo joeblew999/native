@@ -199,7 +199,24 @@ func main() {
 		fail(err)
 	}
 	defer w.Destroy()
-	err = w.Bind("report", func(v map[string]any) { emit(v) })
+	err = w.Bind("report", func(v map[string]any) {
+		if v["type"] != "ready" {
+			emit(v)
+			return
+		}
+		// Move keyboard focus into the page before saying ready. glaze does
+		// it once at start-up, but on a cold WebView2 start that can run
+		// before Chromium's windows exist, and a window that is never
+		// activated never gets the WM_SETFOCUS that would retry it: measured
+		// on the windows-11-arm runner, where the first testwin then had no
+		// focus window at all and dropped every key. This makes the window
+		// active inside its own thread only; WS_EX_NOACTIVATE keeps the
+		// foreground where it is.
+		w.Dispatch(func() {
+			w.Focus()
+			emit(v)
+		})
+	})
 	if err != nil {
 		fail(err)
 	}

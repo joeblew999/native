@@ -36,6 +36,7 @@ var (
 	procGetClassNameW            = user32.NewProc("GetClassNameW")
 	procGetAncestor              = user32.NewProc("GetAncestor")
 	procWindowFromPoint          = user32.NewProc("WindowFromPoint")
+	procGetWindowLongW           = user32.NewProc("GetWindowLongW")
 	procMapVirtualKeyW           = user32.NewProc("MapVirtualKeyW")
 	procSendInput                = user32.NewProc("SendInput")
 	procSetCursorPos             = user32.NewProc("SetCursorPos")
@@ -70,7 +71,14 @@ const (
 	gaParent      = 1
 	gaRoot        = 2
 	mapvkVKToVSC  = 0
-	dwmwaExtFrame = 9 // DWMWA_EXTENDED_FRAME_BOUNDS
+	dwmwaExtFrame = 9  // DWMWA_EXTENDED_FRAME_BOUNDS
+	dwmwaCloaked  = 14 // DWMWA_CLOAKED
+
+	// gwlExStyle is GWL_EXSTYLE (-20) as the uintptr the int argument is
+	// passed in.
+	gwlExStyle     = ^uintptr(19)
+	wsExToolWindow = 0x00000080
+	wsExAppWindow  = 0x00040000
 
 	inputMouse    = 0
 	inputKeyboard = 1
@@ -216,7 +224,7 @@ func (a *App) window() (uintptr, rect, error) {
 		if int(pid) != a.pid || call(procIsWindowVisible, h) == 0 || call(procIsIconic, h) != 0 {
 			continue
 		}
-		if call(procGetWindow, h, gwOwner) != 0 {
+		if call(procGetWindow, h, gwOwner) != 0 || !appWindow(h) {
 			continue
 		}
 		r, ok := frame(h)
@@ -226,6 +234,20 @@ func (a *App) window() (uintptr, rect, error) {
 		return h, r, nil
 	}
 	return 0, rect{}, ErrNoWindow
+}
+
+// appWindow applies the taskbar's rule for an application window: not a tool
+// window (a floating palette, or testwin's cover) unless it asks to be an app
+// window, and not cloaked (a UWP window that user32 calls visible but DWM
+// does not draw).
+func appWindow(h uintptr) bool {
+	ex := call(procGetWindowLongW, h, gwlExStyle)
+	if ex&wsExToolWindow != 0 && ex&wsExAppWindow == 0 {
+		return false
+	}
+	var cloaked uint32
+	hr := call(procDwmGetWindowAttribute, h, dwmwaCloaked, uintptr(unsafe.Pointer(&cloaked)), unsafe.Sizeof(cloaked))
+	return hr != 0 || cloaked == 0
 }
 
 // childAt returns the deepest visible descendant of top containing the screen

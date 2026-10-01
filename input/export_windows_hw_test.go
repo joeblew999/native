@@ -8,14 +8,39 @@ import (
 	"unsafe"
 )
 
-// GWL_EXSTYLE is -20; GetWindowLongW takes it as an int.
 const gwHwndPrev = 3
 
 var (
-	procGetWindowLongW      = syscall.NewLazyDLL("user32.dll").NewProc("GetWindowLongW")
 	procGetWindowTextW      = syscall.NewLazyDLL("user32.dll").NewProc("GetWindowTextW")
 	procGetForegroundWindow = syscall.NewLazyDLL("user32.dll").NewProc("GetForegroundWindow")
 )
+
+var (
+	procOpenProcess                = syscall.NewLazyDLL("kernel32.dll").NewProc("OpenProcess")
+	procQueryFullProcessImageNameW = syscall.NewLazyDLL("kernel32.dll").NewProc("QueryFullProcessImageNameW")
+)
+
+// exe names the process's executable, or "" when it cannot be opened.
+func exe(pid uint32) string {
+	const processQueryLimitedInformation = 0x1000
+	h := call(procOpenProcess, processQueryLimitedInformation, 0, uintptr(pid))
+	if h == 0 {
+		return ""
+	}
+	defer func() { _ = syscall.CloseHandle(syscall.Handle(h)) }()
+	var buf [512]uint16
+	n := uint32(len(buf))
+	if call(procQueryFullProcessImageNameW, h, 0, uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&n))) == 0 {
+		return ""
+	}
+	s := syscall.UTF16ToString(buf[:n])
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] == '\\' {
+			return s[i+1:]
+		}
+	}
+	return s
+}
 
 func title(h uintptr) string {
 	var buf [256]uint16
@@ -42,7 +67,7 @@ func Targets(pid int) string {
 	}
 	d := func(h uintptr) string {
 		p, _ := windowPID(h)
-		return fmt.Sprintf("%#x %s (pid %d)", h, className(h), p)
+		return fmt.Sprintf("%#x %s (pid %d %s)", h, className(h), p, exe(p))
 	}
 	ex, ey, shows := exposedPoint(top, r)
 	s := fmt.Sprintf("top %s frame %v\nkeys -> %s\nmouse -> %s\nwheel point (%d,%d) exposed=%v\ntree:",
@@ -69,7 +94,7 @@ func Targets(pid int) string {
 			continue
 		}
 		wr, _ := windowRect(h)
-		s += fmt.Sprintf("\n  %s %q rect=%v exstyle=%#x cloaked=%v", d(h), title(h), wr, call(procGetWindowLongW, h, uintptr(^uint32(0)-19)), cloaked(h))
+		s += fmt.Sprintf("\n  %s %q rect=%v exstyle=%#x cloaked=%v", d(h), title(h), wr, call(procGetWindowLongW, h, gwlExStyle), cloaked(h))
 	}
 	return s
 }

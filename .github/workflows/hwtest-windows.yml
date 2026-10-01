@@ -24,6 +24,9 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go env GOARCH
+      - name: what is on the desktop
+        shell: pwsh
+        run: Get-Process | Where-Object MainWindowTitle | Format-Table Id, ProcessName, MainWindowTitle -AutoSize
       - name: hwtest (background input, window capture)
         shell: bash
         env:
