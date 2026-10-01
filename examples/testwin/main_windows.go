@@ -202,13 +202,6 @@ func main() {
 	}
 	defer w.Destroy()
 	err = w.Bind("report", func(v map[string]any) {
-		if v["type"] == "focus" && v["focused"] == false && !*blur {
-			// Keep the page focused: on a cold WebView2 start the page was
-			// measured losing focus again right after ready, which made the
-			// first test of a run drop every key. Losing focus is its own
-			// case, which -blur tests on purpose.
-			w.Dispatch(w.Focus)
-		}
 		if v["type"] != "ready" {
 			emit(v)
 			return
