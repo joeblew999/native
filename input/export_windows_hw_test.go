@@ -2,7 +2,15 @@
 
 package input
 
-import "fmt"
+import (
+	"fmt"
+	"syscall"
+)
+
+// GWL_EXSTYLE is -20; GetWindowLongW takes it as an int.
+const gwHwndPrev = 3
+
+var procGetWindowLongW = syscall.NewLazyDLL("user32.dll").NewProc("GetWindowLongW")
 
 // Targets describes the windows the App methods would post to for pid: the
 // top-level window, the keyboard target and the mouse target at the window's
@@ -29,5 +37,15 @@ func Targets(pid int) string {
 		}
 	}
 	walk(top, 1)
+	cx, cy := (r.Left+r.Right)/2, (r.Top+r.Bottom)/2
+	s += fmt.Sprintf("\nWindowFromPoint(centre) = %s, root %s", d(windowFromPoint(cx, cy)), d(call(procGetAncestor, windowFromPoint(cx, cy), gaRoot)))
+	s += "\nvisible windows above it:"
+	for h := call(procGetWindow, top, gwHwndPrev); h != 0; h = call(procGetWindow, h, gwHwndPrev) {
+		if call(procIsWindowVisible, h) == 0 {
+			continue
+		}
+		wr, _ := windowRect(h)
+		s += fmt.Sprintf("\n  %s rect=%v exstyle=%#x", d(h), wr, call(procGetWindowLongW, h, uintptr(^uint32(0)-19)))
+	}
 	return s
 }

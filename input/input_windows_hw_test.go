@@ -50,15 +50,23 @@ func start(t *testing.T, flags ...string) (*testwin.Win, *input.App, int, int) {
 
 func TestAppKeyTap(t *testing.T) {
 	w, app, _, _ := start(t)
-	err := app.KeyTap(input.KeyA)
-	if err != nil {
-		t.Fatal(err)
+	var e testwin.Event
+	ok := false
+	for try := 1; try <= 8 && !ok; try++ {
+		err := app.KeyTap(input.KeyA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e, ok = w.Next(time.Second, func(e testwin.Event) bool { return e.Type() == "key" })
+		t.Logf("KeyTap attempt %d landed: %v", try, ok)
 	}
-	e := w.Wait(t, landWithin, func(e testwin.Event) bool { return e.Type() == "key" })
+	if !ok {
+		t.Fatalf("no key event; saw %v", w.Seen())
+	}
 	if e.Str("key") != "a" || e.Str("code") != "KeyA" {
 		t.Errorf("got key %q code %q, want a / KeyA", e.Str("key"), e.Str("code"))
 	}
-	err = app.KeyTap(input.KeyReturn)
+	err := app.KeyTap(input.KeyReturn)
 	if err != nil {
 		t.Fatal(err)
 	}

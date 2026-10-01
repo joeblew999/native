@@ -267,8 +267,8 @@ func coveredBy(hwnd uintptr) bool {
 	return false
 }
 
-// coverWith puts an opaque green window exactly over hwnd's frame, directly
-// above it in the Z order, without activating anything.
+// coverWith puts an opaque green window exactly over hwnd's frame, at the
+// top of the Z order, without activating anything.
 func coverWith(hwnd uintptr) {
 	cls := register("native-testwin-cover", call(procCreateSolidBrush, 0x008000))
 	f := frameOf(hwnd)
@@ -278,10 +278,9 @@ func coverWith(hwnd uintptr) {
 	if c == 0 {
 		fail(fmt.Errorf("CreateWindowExW (cover) failed"))
 	}
-	// Inserted after the window just above testwin, which puts it between
-	// that window and testwin; with nothing above, after is 0, HWND_TOP.
-	after := call(procGetWindow, hwnd, gwHwndPrev)
-	call(procSetWindowPos, c, after, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate|swpShowWindow)
+	// HWND_TOP (0): above testwin wherever testwin is, still without
+	// activating anything.
+	call(procSetWindowPos, c, 0, 0, 0, 0, 0, swpNoMove|swpNoSize|swpNoActivate|swpShowWindow)
 }
 
 // ptr reinterprets a native handle as the unsafe.Pointer glaze takes; spelled
