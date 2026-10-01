@@ -11,6 +11,7 @@ package input_test
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,7 +52,23 @@ func start(t *testing.T, flags ...string) (*testwin.Win, *input.App, int, int) {
 	w.Drain()
 	t.Logf("testwin pid %d hwnd %#x\n%s", w.PID, w.Window, input.Targets(w.PID))
 	s := w.Seen()
-	return w, input.Target(w.PID), int(s[0].Num("border")), int(s[0].Num("titlebar"))
+	app := input.Target(w.PID)
+	bx, tb := int(s[0].Num("border")), int(s[0].Num("titlebar"))
+	if !pageFocused(s) && !hasFlag(flags, "-blur") {
+		// Keys only reach a page Chromium considers focused (see
+		// TestAppTypeStringBlurred). A cold WebView2 start in a window that is
+		// never activated can end without focus, so give it focus the way a
+		// caller would: a background click on the text field.
+		t.Log("page not focused after start: clicking the text field")
+		err := app.Click(bx+100, tb+132, input.Left)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.Wait(t, landWithin, func(e testwin.Event) bool { return e.Type() == "click" })
+		time.Sleep(200 * time.Millisecond)
+		w.Drain()
+	}
+	return w, app, bx, tb
 }
 
 func TestAppKeyTap(t *testing.T) {
@@ -229,7 +246,7 @@ func TestAppTypeStringBlurred(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.Wait(t, landWithin, func(e testwin.Event) bool {
-		return e.Type() == "input" && len(e.Str("value")) > 0 && e.Str("value")[len(e.Str("value"))-len("é👋"):] == "é👋"
+		return e.Type() == "input" && strings.HasSuffix(e.Str("value"), "é👋")
 	})
 }
 
@@ -239,6 +256,29 @@ func TestAppNoWindow(t *testing.T) {
 	if !errors.Is(err, input.ErrNoWindow) {
 		t.Fatalf("err %v, want ErrNoWindow", err)
 	}
+}
+
+// pageFocused reads the page's last reported focus state.
+func pageFocused(seen []testwin.Event) bool {
+	focused := false
+	for _, e := range seen {
+		switch e.Type() {
+		case "ready":
+			focused = e["focused"] == true
+		case "focus":
+			focused = e["focused"] == true
+		}
+	}
+	return focused
+}
+
+func hasFlag(flags []string, f string) bool {
+	for _, g := range flags {
+		if g == f {
+			return true
+		}
+	}
+	return false
 }
 
 func abs(f float64) float64 {

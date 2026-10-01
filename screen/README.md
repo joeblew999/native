@@ -15,10 +15,10 @@ img, err := screen.CaptureWindow(windowID) // *image.RGBA
 
 | Func | Description |
 | --- | --- |
-| `CaptureWindow(windowID uint32) (*image.RGBA, error)` | One window's own pixels (frame and title bar, no shadow), covered or not. `windowID` is a `CGWindowID` on macOS. |
+| `CaptureWindow(windowID uint32) (*image.RGBA, error)` | One window's own pixels (frame and title bar, no shadow), covered or not. `windowID` is a `CGWindowID` on macOS, an `HWND` on Windows. |
 | `Capture(r image.Rectangle) (*image.RGBA, error)` | Rectangle `r` of the main display, in points from its top-left, as the user sees it. Clipped to the display. |
 | `Size() (w, h int, err error)` | Main display size in points. |
-| `CaptureAllowed() bool` | Whether the process holds the Screen Recording permission. Never prompts. |
+| `CaptureAllowed() bool` | Whether the process holds the Screen Recording permission. Never prompts. Always true on Windows. |
 
 Images are at pixel resolution: on a Retina display a 400x300-point window
 comes back 800x600. Colours are converted to sRGB, and `image.RGBA`'s
@@ -26,15 +26,16 @@ premultiplied layout is what CoreGraphics draws, so there is no per-pixel
 conversion in Go.
 
 Errors: `ErrUnsupported` (no backend), `ErrNotAllowed` (no Screen Recording
-permission), `ErrNoWindow` (no window with that ID). No native types cross the
-API.
+permission), `ErrNoWindow` (no window with that ID), `ErrBlank` (the OS handed
+back an all-black image instead of the window, Windows). No native types cross
+the API.
 
 ## Platforms
 
 | OS | Backend | Status |
 | --- | --- | --- |
 | macOS 14+ | ScreenCaptureKit: `SCShareableContent`, `SCContentFilter`, `SCScreenshotManager` | `CaptureWindow`: ✅ tested on hardware (arm64); `Capture`: code only, see below |
-| Windows | — | ⬜ `ErrUnsupported` (separate PR) |
+| Windows 10+ | GDI: `PrintWindow(PW_RENDERFULLCONTENT)` (window), `BitBlt` from the screen DC (`Capture`), `GetSystemMetrics` (`Size`) | `CaptureWindow`, `Capture`, `Size`: ✅ tested in CI (GitHub `windows-latest` amd64, `windows-11-arm` arm64) |
 | Linux | — | ⬜ `ErrUnsupported` (separate PR) |
 
 `CGWindowListCreateImage`, the old one-call API, is obsoleted from macOS 15;
@@ -69,6 +70,44 @@ another process ordered behind every other window:
 test brings testwin to the front, so it lives under the `hwtest_global` tag
 with the global input tests and runs only in a VM, on explicit request.
 
+## Windows
+
+Measured 2026-10-01 in CI (`.github/workflows/hwtest-windows.yml`, GitHub's
+`windows-latest` and `windows-11-arm` runners, which run the job in an
+interactive desktop session with WebView2 installed), against the same
+[`examples/testwin`](../examples/testwin) page in a glaze (WebView2) window:
+
+- **`PrintWindow(PW_RENDERFULLCONTENT)` captures WebView2 content.** It is
+  not black: the swatch and background come back exact (GDI does no colour
+  management). `PW_RENDERFULLCONTENT` is what makes it work: it asks DWM for
+  the composed content, DirectComposition included, which is how WebView2
+  draws. Windows.Graphics.Capture was not needed.
+- **Covered**: with another window fully over testwin, text typed into it in
+  the background turns the swatch cyan and `CaptureWindow` shows the cyan.
+- **Black frames are detected, not returned.** A window with
+  `SetWindowDisplayAffinity(WDA_MONITOR)` (what [`nocapture`](../nocapture)
+  does) comes back from `PrintWindow` as an all-black bitmap with success;
+  `CaptureWindow` returns `ErrBlank` instead (`TestCaptureWindowProtected` is
+  the negative control). A frame counts as blank when no pixel has a channel
+  above 8.
+- Images are cropped to `DWMWA_EXTENDED_FRAME_BOUNDS`, the frame DWM draws,
+  so the invisible resize borders `GetWindowRect` counts on Windows 10+ are
+  not in them: a 400x300 client area comes back 402x332 (1-pixel border,
+  31-pixel title bar at 100% scaling).
+- A minimised window has nothing to capture; `CaptureWindow` returns an error.
+- `Capture` and `Size` run under `hwtest_global` in the same CI job (a
+  disposable runner is where bringing testwin forward is allowed).
+
+There is no permission on Windows, so `CaptureAllowed` is true. What does
+restrict capture: display affinity (`ErrBlank`), the secure desktop (UAC
+prompt, lock screen), and a session with no desktop (a service in session 0),
+where GDI returns black or fails. HWNDs are 32-bit values on every Windows (so
+32- and 64-bit processes can share them), which is why they fit `uint32`.
+
+Coordinates are pixels as the calling process sees them: a DPI-unaware
+process gets virtualised coordinates at scaling above 100%. Tested at 100%
+only.
+
 ## Implementation notes
 
 ScreenCaptureKit is asynchronous: every call takes an Objective-C completion
@@ -86,7 +125,7 @@ runner) without capturing anything.
 
 ```bash
 go test ./screen                 # unit tests, capture nothing
-go test -tags hwtest ./screen    # capture testwin in the background; needs Screen Recording
+go test -tags hwtest ./screen    # capture testwin in the background; needs Screen Recording on macOS
 ```
 
 ## Example
