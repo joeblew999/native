@@ -82,8 +82,9 @@ func TestCaptureWindow(t *testing.T) {
 	checkForeground(t, front, w)
 }
 
-// TestCaptureWindowCovered hides testwin under another window, types into it
-// in the background, and expects the capture to show the page's reaction.
+// TestCaptureWindowCovered hides testwin under another window, clicks its
+// button in the background, and expects the capture to show the page's
+// reaction.
 func TestCaptureWindowCovered(t *testing.T) {
 	front := testwin.Frontmost(t)
 	w := testwin.Start(t, 200, 220, "-cover")
@@ -94,28 +95,19 @@ func TestCaptureWindowCovered(t *testing.T) {
 	captureUntil(t, w, 100, 50, magenta)
 	time.Sleep(time.Second)
 	w.Drain()
-	// Text only lands in a focused page (see input's README); a background
-	// click on the field restores focus if the cold start lost it.
-	app := input.Target(w.PID)
+	// A background click on the button turns the swatch cyan. (Clicks land
+	// whatever the page's focus; keys need a focused page, see input's
+	// README.)
 	bx, tb := offsets(w)
-	for try := 1; !w.PageFocused() && try <= 5; try++ {
-		t.Logf("page not focused: background click on the text field (%d)", try)
-		err := app.Click(bx+100, tb+132, input.Left)
-		if err != nil {
-			t.Fatal(err)
-		}
-		time.Sleep(500 * time.Millisecond)
-		w.Drain()
-	}
-	err := app.TypeString("x")
+	err := input.Target(w.PID).Click(bx+90, tb+190, input.Left)
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.Wait(t, 3*time.Second, func(e testwin.Event) bool { return e.Type() == "input" && e.Str("value") == "x" })
+	w.Wait(t, 3*time.Second, func(e testwin.Event) bool { return e.Type() == "click" })
 	img, got := captureUntil(t, w, 100, 50, cyan)
 	keep(t, img, "testwin-covered.png")
 	if !near(got, cyan) {
-		t.Errorf("covered window's swatch is %v after typing, want cyan: the capture did not see the update", got)
+		t.Errorf("covered window's swatch is %v after the click, want cyan: the capture did not see the update", got)
 	}
 	checkForeground(t, front, w)
 }

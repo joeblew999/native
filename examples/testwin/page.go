@@ -46,7 +46,7 @@ html,body{margin:0;height:100%;background:#ffffff;font:14px -apple-system,sans-s
   field.addEventListener('input', function(){
     // The swatch turns cyan while the field holds text, so a capture can see
     // that background typing changed the page.
-    swatch.style.background = field.value ? '#00ffff' : '#ff00ff';
+    swatch.style.background = (field.value || clicks) ? '#00ffff' : '#ff00ff';
     report({type:'input', value:field.value});
   });
   document.addEventListener('mousedown', function(e){
@@ -56,7 +56,7 @@ html,body{margin:0;height:100%;background:#ffffff;font:14px -apple-system,sans-s
     report({type:'mouseup', x:e.clientX, y:e.clientY, button:e.button});
   }, true);
   document.addEventListener('click', function(e){
-    if (e.target === btn) { clicks++; btn.textContent = 'clicks: ' + clicks; }
+    if (e.target === btn) { clicks++; btn.textContent = 'clicks: ' + clicks; swatch.style.background = '#00ffff'; }
     report({type:'click', x:e.clientX, y:e.clientY, button:e.button, count:clicks});
   }, true);
   document.addEventListener('contextmenu', function(e){

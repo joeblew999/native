@@ -62,41 +62,21 @@ func start(t *testing.T, flags ...string) (*testwin.Win, *input.App, int, int) {
 
 func TestAppKeyTap(t *testing.T) {
 	w, app, _, _ := start(t)
-	var e testwin.Event
-	ok := false
-	for try := 1; try <= 8 && !ok; try++ {
-		err := app.KeyTap(input.KeyA)
-		if err != nil {
-			t.Fatal(err)
-		}
-		e, ok = w.Next(time.Second, func(e testwin.Event) bool { return e.Type() == "key" })
-		t.Logf("KeyTap attempt %d landed: %v", try, ok)
+	e := keyed(t, w, app, func() error { return app.KeyTap(input.KeyA) },
+		func(e testwin.Event) bool { return e.Type() == "key" && e.Str("code") == "KeyA" })
+	if e.Str("key") != "a" {
+		t.Errorf("got key %q, want a", e.Str("key"))
 	}
-	if !ok {
-		t.Fatalf("no key event; saw %v\n%s", w.Seen(), input.Targets(w.PID))
-	}
-	if e.Str("key") != "a" || e.Str("code") != "KeyA" {
-		t.Errorf("got key %q code %q, want a / KeyA", e.Str("key"), e.Str("code"))
-	}
-	err := app.KeyTap(input.KeyReturn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e = w.Wait(t, landWithin, func(e testwin.Event) bool { return e.Type() == "key" && e.Str("key") != "a" })
-	if e.Str("key") != "Enter" {
-		t.Errorf("got key %q, want Enter", e.Str("key"))
-	}
+	keyed(t, w, app, func() error { return app.KeyTap(input.KeyReturn) },
+		func(e testwin.Event) bool { return e.Type() == "key" && e.Str("key") == "Enter" })
 }
 
 // TestAppKeyTapModifier records what a modifier does: a posted message cannot
 // set the target's keyboard state, which is where Chromium reads modifiers.
 func TestAppKeyTapModifier(t *testing.T) {
 	w, app, _, _ := start(t)
-	err := app.KeyTap(input.KeyB, input.ModShift)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e := w.Wait(t, landWithin, func(e testwin.Event) bool { return e.Type() == "key" && e.Str("code") == "KeyB" })
+	e := keyed(t, w, app, func() error { return app.KeyTap(input.KeyB, input.ModShift) },
+		func(e testwin.Event) bool { return e.Type() == "key" && e.Str("code") == "KeyB" })
 	mods, _ := e["mods"].([]any)
 	t.Logf("Shift+B arrived as key %q mods %v", e.Str("key"), mods)
 }
@@ -104,13 +84,8 @@ func TestAppKeyTapModifier(t *testing.T) {
 func TestAppTypeString(t *testing.T) {
 	w, app, _, _ := start(t)
 	const s = "héllo, wörld 👋 日本"
-	err := app.TypeString(s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.Wait(t, 5*time.Second, func(e testwin.Event) bool {
-		return e.Type() == "input" && e.Str("value") == s
-	})
+	keyed(t, w, app, func() error { return app.TypeString(s) },
+		func(e testwin.Event) bool { return e.Type() == "input" && strings.HasSuffix(e.Str("value"), s) })
 }
 
 func TestAppClick(t *testing.T) {
@@ -230,13 +205,8 @@ func TestAppTypeStringBlurred(t *testing.T) {
 	w.Wait(t, landWithin, func(e testwin.Event) bool { return e.Type() == "click" })
 	time.Sleep(200 * time.Millisecond)
 	t.Logf("after the click:\n%s", input.Targets(w.PID))
-	err = app.TypeString("é👋")
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.Wait(t, landWithin, func(e testwin.Event) bool {
-		return e.Type() == "input" && strings.HasSuffix(e.Str("value"), "é👋")
-	})
+	keyed(t, w, app, func() error { return app.TypeString("é👋") },
+		func(e testwin.Event) bool { return e.Type() == "input" && strings.HasSuffix(e.Str("value"), "é👋") })
 }
 
 func TestAppNoWindow(t *testing.T) {
@@ -255,10 +225,7 @@ func TestAppNoWindow(t *testing.T) {
 // field, until it holds.
 func focusPage(t *testing.T, w *testwin.Win, app *input.App, bx, tb int) {
 	t.Helper()
-	for try := 1; !w.PageFocused(); try++ {
-		if try > 5 {
-			t.Fatalf("page still not focused after %d clicks; saw %v", try-1, w.Seen())
-		}
+	for try := 1; !w.PageFocused() && try <= 5; try++ {
 		t.Logf("page not focused: background click on the text field (%d)", try)
 		err := app.Click(bx+100, tb+132, input.Left)
 		if err != nil {
@@ -267,6 +234,31 @@ func focusPage(t *testing.T, w *testwin.Win, app *input.App, bx, tb int) {
 		time.Sleep(500 * time.Millisecond)
 		w.Drain()
 	}
+}
+
+// keyed sends keyboard input with do and waits for match, giving the page
+// focus first (focusPage) and trying again if focus was lost in between.
+// testwin's window has WS_EX_NOACTIVATE so it can never take the foreground,
+// and in that state the page was measured losing focus again at times after
+// Chromium took it; the attempt count is logged so a run shows how often.
+func keyed(t *testing.T, w *testwin.Win, app *input.App, do func() error, match func(testwin.Event) bool) testwin.Event {
+	t.Helper()
+	s := w.Seen()
+	bx, tb := int(s[0].Num("border")), int(s[0].Num("titlebar"))
+	for try := 1; try <= 5; try++ {
+		focusPage(t, w, app, bx, tb)
+		err := do()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e, ok := w.Next(1500*time.Millisecond, match); ok {
+			t.Logf("landed on attempt %d", try)
+			return e
+		}
+		t.Logf("attempt %d did not land; page focused: %v", try, w.PageFocused())
+	}
+	t.Fatalf("keyboard input never landed; saw %v\n%s", w.Seen(), input.Targets(w.PID))
+	return nil
 }
 
 func hasFlag(flags []string, f string) bool {

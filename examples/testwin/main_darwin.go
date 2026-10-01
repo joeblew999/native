@@ -28,8 +28,8 @@
 // title bar. -nsevents adds a line for every NSEvent the app receives, before
 // any window sees it: the tool that found how to route a posted click.
 //
-// The swatch is magenta while the text field is empty and cyan once it holds
-// text.
+// The swatch is magenta while the text field is empty and the button
+// unclicked, and cyan once either changes.
 //
 // It exits when stdin closes, so a test that dies does not leave it behind.
 package main
