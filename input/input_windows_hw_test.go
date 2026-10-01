@@ -159,7 +159,7 @@ func TestAppScroll(t *testing.T) {
 // process's window, so nothing is expected to arrive.
 func TestAppScrollCovered(t *testing.T) {
 	w, app, _, _ := start(t, "-cover")
-	w.Wait(t, 10*time.Second, func(e testwin.Event) bool { return e.Type() == "covered" })
+	w.WaitSeen(t, 10*time.Second, func(e testwin.Event) bool { return e.Type() == "covered" })
 	w.Drain()
 	err := app.Scroll(0, -3)
 	if err != nil {
@@ -185,7 +185,7 @@ func TestAppTypeStringCovered(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w, app, _, _ := start(t, tc.flags...)
-			w.Wait(t, 10*time.Second, func(e testwin.Event) bool { return e.Type() == "covered" })
+			w.WaitSeen(t, 10*time.Second, func(e testwin.Event) bool { return e.Type() == "covered" })
 			time.Sleep(time.Second)
 			w.Drain()
 			err := app.TypeString("x")
@@ -205,7 +205,7 @@ func TestAppTypeStringCovered(t *testing.T) {
 // target only), after which text lands. The foreground must not move.
 func TestAppTypeStringBlurred(t *testing.T) {
 	w, app, bx, tb := start(t, "-blur")
-	w.Wait(t, 5*time.Second, func(e testwin.Event) bool { return e.Type() == "blurred" })
+	w.WaitSeen(t, 5*time.Second, func(e testwin.Event) bool { return e.Type() == "blurred" })
 	time.Sleep(500 * time.Millisecond)
 	w.Drain()
 	t.Logf("after blur:\n%s", input.Targets(w.PID))

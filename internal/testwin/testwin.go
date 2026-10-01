@@ -121,6 +121,18 @@ func (w *Win) Wait(t *testing.T, d time.Duration, match func(Event) bool) Event 
 	return e
 }
 
+// WaitSeen is Wait, but also matches an event already consumed (by Drain,
+// say).
+func (w *Win) WaitSeen(t *testing.T, d time.Duration, match func(Event) bool) Event {
+	t.Helper()
+	for _, e := range w.Seen() {
+		if match(e) {
+			return e
+		}
+	}
+	return w.Wait(t, d, match)
+}
+
 // Next is Wait without failing: ok is false on timeout.
 func (w *Win) Next(d time.Duration, match func(Event) bool) (Event, bool) {
 	timeout := time.After(d)
