@@ -24,9 +24,16 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go env GOARCH
-      - name: what is on the desktop
+      # The windows-11-arm image comes up with a full-screen "Microsoft account"
+      # prompt (WWAHost.exe) in the foreground, over every other window. It
+      # makes testwin's window unreachable by WindowFromPoint, so Chromium
+      # drops wheel events aimed at it, and it keeps -front from taking the
+      # foreground for the global tests. Close it; nothing here needs it.
+      - name: clear the desktop
         shell: pwsh
-        run: Get-Process | Where-Object MainWindowTitle | Format-Table Id, ProcessName, MainWindowTitle -AutoSize
+        run: |
+          Get-Process | Where-Object MainWindowTitle | Format-Table Id, ProcessName, MainWindowTitle -AutoSize
+          Get-Process -Name WWAHost -ErrorAction SilentlyContinue | Stop-Process -Force -PassThru | Format-Table Id, ProcessName
       - name: hwtest (background input, window capture)
         shell: bash
         env:

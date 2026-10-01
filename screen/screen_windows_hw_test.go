@@ -94,6 +94,8 @@ func TestCaptureWindowCovered(t *testing.T) {
 		t.Fatalf("testwin still exposed after covering: %v", c)
 	}
 	captureUntil(t, w, 100, 50, magenta)
+	time.Sleep(time.Second)
+	w.Drain()
 	err := input.Target(w.PID).TypeString("x")
 	if err != nil {
 		t.Fatal(err)
