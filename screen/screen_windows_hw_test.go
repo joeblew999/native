@@ -79,9 +79,7 @@ func TestCaptureWindow(t *testing.T) {
 	if c := img.RGBAAt(bx+300, tb+60); !near(c, white) {
 		t.Errorf("background pixel %v, want white", c)
 	}
-	if after := testwin.Frontmost(t); after != front {
-		t.Errorf("foreground window changed: %s -> %s", front, after)
-	}
+	checkForeground(t, front, w)
 }
 
 // TestCaptureWindowCovered hides testwin under another window, types into it
@@ -106,9 +104,7 @@ func TestCaptureWindowCovered(t *testing.T) {
 	if !near(got, cyan) {
 		t.Errorf("covered window's swatch is %v after typing, want cyan: the capture did not see the update", got)
 	}
-	if after := testwin.Frontmost(t); after != front {
-		t.Errorf("foreground window changed: %s -> %s", front, after)
-	}
+	checkForeground(t, front, w)
 }
 
 // TestCaptureWindowProtected is the negative control for the blank check: a
@@ -133,6 +129,21 @@ func TestCaptureWindowMissing(t *testing.T) {
 	if !errors.Is(err, screen.ErrNoWindow) {
 		t.Fatalf("err %v, want ErrNoWindow", err)
 	}
+}
+
+// checkForeground fails the test if testwin took the foreground; a change to
+// another process is the CI runner's own doing and only logged.
+func checkForeground(t *testing.T, front string, w *testwin.Win) {
+	t.Helper()
+	after := testwin.Frontmost(t)
+	if after == front {
+		return
+	}
+	if testwin.ForegroundPID() == w.PID {
+		t.Errorf("testwin took the foreground: %s -> %s", front, after)
+		return
+	}
+	t.Logf("foreground changed, not to testwin: %s -> %s", front, after)
 }
 
 // keep writes the capture where SCREEN_KEEP points (CI uploads it).

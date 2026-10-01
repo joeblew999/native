@@ -14,7 +14,6 @@ package input
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"syscall"
 	"time"
 	"unicode/utf16"
@@ -61,7 +60,6 @@ const (
 	wmChar        = 0x0102
 	wmSysKeyDown  = 0x0104
 	wmSysKeyUp    = 0x0105
-	wmSetFocus    = 0x0007
 
 	mkLButton = 0x0001
 	mkRButton = 0x0002
@@ -297,42 +295,28 @@ func findClass(hwnd uintptr, class string) uintptr {
 // focus inside the page.
 const renderWidgetClass = "Chrome_RenderWidgetHostHWND"
 
-// keyWindow picks the window keyboard messages go to, and reports whether it
-// holds the target thread's keyboard focus. It is the window the target's GUI
-// thread has focused, if that is a descendant of the target window (for a
+// keyWindow picks the window keyboard messages go to: the window the target's
+// GUI thread has focused, if that is a descendant of the target window (for a
 // WebView2 host that is Chromium's Chrome_WidgetWin_1 in the browser process,
 // whose thread input is attached to the host's); else the parent of the
 // Chromium render widget, which is that same window; else the top-level
 // window itself. Reading the focus changes nothing.
 //
 // Measured: keys posted to Chrome_RenderWidgetHostHWND itself are dropped;
-// Chrome_WidgetWin_1 takes them, but only while Chromium believes it has
-// focus (see focusChromium).
-func keyWindow(top uintptr) (uintptr, bool) {
+// Chrome_WidgetWin_1 takes them, but only while it holds the focus of its
+// thread. Chromium drops keys and characters for a page it has blurred, and
+// a posted WM_SETFOCUS does not unblur it (tried); see the README.
+func keyWindow(top uintptr) uintptr {
 	_, tid := windowPID(top)
 	gi := guiThreadInfo{cbSize: uint32(unsafe.Sizeof(guiThreadInfo{}))}
 	if call(procGetGUIThreadInfo, uintptr(tid), uintptr(unsafe.Pointer(&gi))) != 0 &&
 		gi.hwndFocus != 0 && gi.hwndFocus != top && call(procGetAncestor, gi.hwndFocus, gaRoot) == top {
-		return gi.hwndFocus, true
+		return gi.hwndFocus
 	}
 	if h := findClass(top, renderWidgetClass); h != 0 {
-		return call(procGetAncestor, h, gaParent), false
+		return call(procGetAncestor, h, gaParent)
 	}
-	return top, false
-}
-
-// focusChromium handles the case that matters most in practice: an app the
-// user switched away from has no focus window in its thread (deactivation
-// takes it), so Chromium has blurred the page and drops every key and
-// character posted to it. Posting WM_SETFOCUS to Chromium's window makes it
-// treat the page as focused again. It is a message, not SetFocus: the
-// system's focus and foreground, and the user's, are untouched. Only done for
-// Chromium windows (WebView2, Electron, Chrome), where it was measured.
-func focusChromium(h uintptr, focused bool) error {
-	if focused || !strings.HasPrefix(className(h), "Chrome_WidgetWin_") {
-		return nil
-	}
-	return post(h, wmSetFocus, 0, 0)
+	return top
 }
 
 // windowFromPoint wraps WindowFromPoint, which takes a POINT by value. POINT
@@ -519,11 +503,7 @@ func (a *App) keyTap(k Key, mods []Modifier) error {
 	if err != nil {
 		return err
 	}
-	h, focused := keyWindow(top)
-	err = focusChromium(h, focused)
-	if err != nil {
-		return err
-	}
+	h := keyWindow(top)
 	down, up := uint32(wmKeyDown), uint32(wmKeyUp)
 	if alt {
 		down, up = wmSysKeyDown, wmSysKeyUp
@@ -564,11 +544,7 @@ func (a *App) typeString(s string) error {
 	if err != nil {
 		return err
 	}
-	h, focused := keyWindow(top)
-	err = focusChromium(h, focused)
-	if err != nil {
-		return err
-	}
+	h := keyWindow(top)
 	for _, r := range s {
 		// One WM_CHAR per UTF-16 unit: a character outside the BMP goes as
 		// its high then its low surrogate, which is how Windows itself

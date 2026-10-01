@@ -21,8 +21,11 @@ var (
 )
 
 func keysDesc(top uintptr, d func(uintptr) string) string {
-	h, focused := keyWindow(top)
-	return fmt.Sprintf("%s focused=%v", d(h), focused)
+	h := keyWindow(top)
+	_, tid := windowPID(top)
+	gi := guiThreadInfo{cbSize: uint32(unsafe.Sizeof(guiThreadInfo{}))}
+	call(procGetGUIThreadInfo, uintptr(tid), uintptr(unsafe.Pointer(&gi)))
+	return fmt.Sprintf("%s focused=%v", d(h), gi.hwndFocus == h)
 }
 
 // exe names the process's executable, or "" when it cannot be opened.
