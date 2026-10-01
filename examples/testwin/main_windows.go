@@ -6,7 +6,8 @@
 // and is shown with SW_SHOWNOACTIVATE before glaze sees it: without the
 // extended style, glaze's start-up (ShowWindow(SW_SHOW), then MoveFocus,
 // which makes WebView2 call SetFocus and so activate the top-level window)
-// took the foreground on GitHub's windows-latest runner. It is shown on top of
+// took the foreground on GitHub's windows-latest runner. Once the page is
+// ready the style is cleared again, so the window behaves as any app's. It is shown on top of
 // the Z order, not behind everything as on macOS, because Chromium drops a
 // wheel event whose point is over another process's window; -cover hides it
 // for the tests that want it hidden. Whatever the user (or the CI session)
@@ -62,6 +63,8 @@ var (
 	procGetWindowThreadPID  = user32.NewProc("GetWindowThreadProcessId")
 	procBringWindowToTop    = user32.NewProc("BringWindowToTop")
 	procSetFocus            = user32.NewProc("SetFocus")
+	procGetWindowLongPtrW   = user32.NewProc("GetWindowLongPtrW")
+	procSetWindowLongPtrW   = user32.NewProc("SetWindowLongPtrW")
 	procCreateSolidBrush    = gdi32.NewProc("CreateSolidBrush")
 	procDwmGetWindowAttrib  = dwmapi.NewProc("DwmGetWindowAttribute")
 	procSetDisplayAffinity  = user32.NewProc("SetWindowDisplayAffinity")
@@ -75,6 +78,10 @@ const (
 
 	wsExToolWindow = 0x00000080
 	wsExNoActivate = 0x08000000
+
+	// gwlExStyle is GWL_EXSTYLE (-20) as the uintptr the int argument is
+	// passed in.
+	gwlExStyle = ^uintptr(19)
 
 	swShowNoActivate = 4
 	swShow           = 5
@@ -215,6 +222,15 @@ func main() {
 		// active inside its own thread only; WS_EX_NOACTIVATE keeps the
 		// foreground where it is.
 		w.Dispatch(func() {
+			if !*front {
+				// Start-up is over: make the window an ordinary one again.
+				// WS_EX_NOACTIVATE was measured blurring the page over and
+				// over (each time Chromium focused it, the system took the
+				// activation straight back), and an ordinary background app
+				// is what the tests are about.
+				ex := call(procGetWindowLongPtrW, hwnd, gwlExStyle)
+				call(procSetWindowLongPtrW, hwnd, gwlExStyle, ex&^wsExNoActivate)
+			}
 			w.Focus()
 			emit(v)
 		})
