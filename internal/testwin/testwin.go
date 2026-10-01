@@ -133,6 +133,18 @@ func (w *Win) WaitSeen(t *testing.T, d time.Duration, match func(Event) bool) Ev
 	return w.Wait(t, d, match)
 }
 
+// PageFocused reads the page's last reported focus state from everything
+// consumed so far ("ready" carries the first one, "focus" events the rest).
+func (w *Win) PageFocused() bool {
+	focused := false
+	for _, e := range w.Seen() {
+		if e.Type() == "ready" || e.Type() == "focus" {
+			focused = e["focused"] == true
+		}
+	}
+	return focused
+}
+
 // Next is Wait without failing: ok is false on timeout.
 func (w *Win) Next(d time.Duration, match func(Event) bool) (Event, bool) {
 	timeout := time.After(d)

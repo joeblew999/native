@@ -54,19 +54,8 @@ func start(t *testing.T, flags ...string) (*testwin.Win, *input.App, int, int) {
 	s := w.Seen()
 	app := input.Target(w.PID)
 	bx, tb := int(s[0].Num("border")), int(s[0].Num("titlebar"))
-	if !pageFocused(s) && !hasFlag(flags, "-blur") {
-		// Keys only reach a page Chromium considers focused (see
-		// TestAppTypeStringBlurred). A cold WebView2 start in a window that is
-		// never activated can end without focus, so give it focus the way a
-		// caller would: a background click on the text field.
-		t.Log("page not focused after start: clicking the text field")
-		err := app.Click(bx+100, tb+132, input.Left)
-		if err != nil {
-			t.Fatal(err)
-		}
-		w.Wait(t, landWithin, func(e testwin.Event) bool { return e.Type() == "click" })
-		time.Sleep(200 * time.Millisecond)
-		w.Drain()
+	if !hasFlag(flags, "-blur") {
+		focusPage(t, w, app, bx, tb)
 	}
 	return w, app, bx, tb
 }
@@ -258,18 +247,26 @@ func TestAppNoWindow(t *testing.T) {
 	}
 }
 
-// pageFocused reads the page's last reported focus state.
-func pageFocused(seen []testwin.Event) bool {
-	focused := false
-	for _, e := range seen {
-		switch e.Type() {
-		case "ready":
-			focused = e["focused"] == true
-		case "focus":
-			focused = e["focused"] == true
+// focusPage makes sure the page has focus before a test that needs it. Keys
+// only reach a page Chromium considers focused (see TestAppTypeStringBlurred),
+// and a cold WebView2 start in a window that is never activated was measured
+// ending without focus, or losing it again a moment later (arm runner). So
+// give it focus the way a caller would, with a background click on the text
+// field, until it holds.
+func focusPage(t *testing.T, w *testwin.Win, app *input.App, bx, tb int) {
+	t.Helper()
+	for try := 1; !w.PageFocused(); try++ {
+		if try > 5 {
+			t.Fatalf("page still not focused after %d clicks; saw %v", try-1, w.Seen())
 		}
+		t.Logf("page not focused: background click on the text field (%d)", try)
+		err := app.Click(bx+100, tb+132, input.Left)
+		if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(500 * time.Millisecond)
+		w.Drain()
 	}
-	return focused
 }
 
 func hasFlag(flags []string, f string) bool {

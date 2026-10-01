@@ -94,7 +94,20 @@ func TestCaptureWindowCovered(t *testing.T) {
 	captureUntil(t, w, 100, 50, magenta)
 	time.Sleep(time.Second)
 	w.Drain()
-	err := input.Target(w.PID).TypeString("x")
+	// Text only lands in a focused page (see input's README); a background
+	// click on the field restores focus if the cold start lost it.
+	app := input.Target(w.PID)
+	bx, tb := offsets(w)
+	for try := 1; !w.PageFocused() && try <= 5; try++ {
+		t.Logf("page not focused: background click on the text field (%d)", try)
+		err := app.Click(bx+100, tb+132, input.Left)
+		if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(500 * time.Millisecond)
+		w.Drain()
+	}
+	err := app.TypeString("x")
 	if err != nil {
 		t.Fatal(err)
 	}

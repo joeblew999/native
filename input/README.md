@@ -29,7 +29,7 @@ app.Scroll(0, -3)
 
 | Func | Description |
 | --- | --- |
-| `Trusted() bool` | Whether the process holds the Accessibility permission. Never prompts. |
+| `Trusted() bool` | Whether the process holds the Accessibility permission. Never prompts. Always true on Windows. |
 | `Target(pid int) *App` | One application, addressed by process ID. |
 | `(*App).Click(x, y int, b Button) error` | Press and release `b` at `(x, y)` points from the top-left of the app's frontmost window (frame, title bar included). |
 | `(*App).Scroll(dx, dy int) error` | Scroll that window by lines, pointer at its centre. `dy > 0` up, `dx > 0` left. |
@@ -59,16 +59,21 @@ define). No native types cross the API.
 | OS | Backend | Status |
 | --- | --- | --- |
 | macOS | Quartz Event Services: `CGEventPostToPid` (per app), `CGEventPost` at the HID tap (global) | per-app: ✅ tested on hardware (arm64); global: code only, see below |
-| Windows | — | ⬜ `ErrUnsupported` (separate PR) |
+| Windows 10+ | window messages posted to the target's windows (`PostMessageW`, per app), `SendInput` (global) | per-app and global: ✅ tested in CI (GitHub `windows-latest` amd64, `windows-11-arm` arm64), see below |
 | Linux | — | ⬜ `ErrUnsupported` (separate PR) |
 
 ## Permission
 
-Both halves need **Accessibility** (System Settings → Privacy & Security →
+On macOS both halves need **Accessibility** (System Settings → Privacy & Security →
 Accessibility) for the process, or for the terminal that launched it. Without
 it macOS drops posted events without saying so; this package checks first and
 returns `ErrNotTrusted` instead. It never prompts and never works around the
 permission.
+
+Windows has no such permission, so `Trusted` is true there. The one real
+restriction is UIPI: messages to a process at a higher integrity level (an
+elevated app, from a non-elevated caller) are refused, and the `App` methods
+return `ErrNotTrusted` for that.
 
 ## Background delivery: what lands
 
@@ -117,9 +122,77 @@ The cursor is never moved by the per-app half: `CGEventPostToPid` hands events
 to the process and bypasses the HID system that owns the pointer. (The tests
 log cursor movement as well; on a machine in use that is the user's own hand.)
 
+## Windows
+
+Per-application events are window messages posted straight to the target's
+windows, so they never enter the system input queue: the real cursor does not
+move and the foreground window does not change. Measured 2026-10-01 in CI
+(`.github/workflows/hwtest-windows.yml`) on GitHub's `windows-latest`
+(amd64) and `windows-11-arm` (arm64) runners, which run the job in an
+interactive desktop session with WebView2 installed. The target is the same
+[`examples/testwin`](../examples/testwin) page, here in a glaze (WebView2)
+window that is never activated. Every test asserts that testwin never became
+the foreground window and that the cursor did not move.
+
+Which window gets the message matters, because WebView2's windows belong to
+another process (`msedgewebview2.exe`) and are children of the app's window:
+
+```
+native-testwin                 testwin.exe          the app's top-level window
+  Chrome_WidgetWin_0           testwin.exe
+    Chrome_WidgetWin_1         msedgewebview2.exe   keys go here (it holds focus)
+      Chrome_RenderWidgetHostHWND  msedgewebview2.exe   mouse goes here
+      Intermediate D3D Window  msedgewebview2.exe (GPU)
+```
+
+The app window is the frontmost visible, unowned top-level window of the pid
+that is not a tool window and not cloaked. Mouse messages go to the deepest
+visible child under the point (`Chrome_RenderWidgetHostHWND`, "Chrome Legacy
+Window"). Keys go to the window the target's GUI thread has focused
+(`GetGUIThreadInfo`), which for WebView2 is `Chrome_WidgetWin_1`; keys posted
+to the render widget itself are dropped.
+
+| Event | Lands in the background WebView2? | Notes |
+| --- | --- | --- |
+| `KeyTap` | ✅ yes, **while the page has focus** | `keydown` with the right `key` and `code` (letters, Return); the scan code from `MapVirtualKeyW` gives `code` |
+| `KeyTap` with modifiers | ⚠️ the key lands, the modifier does not | Shift+B arrives as `b` with no modifiers: Chromium reads modifiers from the keyboard state (`GetKeyState`), which a posted message cannot set |
+| `TypeString` | ✅ yes, **while the page has focus** | `héllo, wörld 👋 日本` arrives intact: one `WM_CHAR` per UTF-16 unit, a surrogate pair as two consecutive messages, as Windows itself sends them |
+| `Click`, left and right | ✅ yes | `mousedown`/`mouseup`/`click` (`contextmenu` for right) at the exact page point; also lands when another window covers testwin (measured under the arm image's full-screen sign-in prompt) |
+| `Scroll`, vertical and horizontal | ✅ yes, **where some of the window shows** | `wheel` with the right signs. Chromium routes a wheel message by the window under its point (`WindowFromPoint`) and drops it when that window belongs to another process, so `Scroll` puts the point on an exposed part of the window (the centre if it shows). Fully covered: dropped |
+| keys/text into a fully covered window | ✅ yes | covering does not matter, with or without WebView2's native occlusion tracking |
+
+**Focus is what decides keyboard delivery.** Chromium drops keys and
+characters for a page it has blurred. An app the user switched away from is in
+exactly that state (deactivation takes the thread's focus), and so, measured,
+is a WebView2 app that started cold in a window that was never activated.
+Posting a fake `WM_SETFOCUS` to Chromium does nothing (tried). What works is a
+background `Click` on the field: Chromium takes focus inside its own window on
+the mouse-down, the page is focused again, and text lands; the foreground
+window does not change (`TestAppTypeStringBlurred`). This package does not do
+that click for you: where to click is the caller's call.
+
+**Activation, a glaze start-up note.** Started without
+`WS_EX_NOACTIVATE`, testwin took the foreground on the `windows-latest`
+runner during glaze's start-up (glaze shows the window with `SW_SHOW` and
+moves focus into WebView2, which activates the window), even though testwin
+itself showed it with `SW_SHOWNOACTIVATE`. On the arm runner the foreground
+lock refused it. testwin now uses `WS_EX_NOACTIVATE`; an app embedding glaze
+that must start in the background needs the same.
+
+Coordinates for `Click` are pixels from the top-left of the frame DWM draws
+(`DWMWA_EXTENDED_FRAME_BOUNDS`, without the invisible resize borders), title
+bar included, as on macOS. Tested at 100% scaling only; a DPI-unaware caller
+gets virtualised coordinates above that.
+
+The global half (`SendInput`, `SetCursorPos`, `GetCursorPos`) passes its
+`hwtest_global` test on both runners: the cursor goes where asked, clicks,
+button down/up, scroll, Shift+A and `é👋` all land in the foreground testwin.
+A disposable CI runner is where that test may run; it moves the real cursor.
+
 ## Global functions
 
-Written, compiled for every target, lint clean, **never run on hardware**:
+On macOS: written, compiled for every target, lint clean, **never run on
+hardware** (on Windows they pass in CI, above):
 their tests (`input_global_test.go`, tag `hwtest_global`) move the real cursor
 and bring testwin to the front, so they run only in a VM, on explicit request:
 
@@ -128,6 +201,15 @@ go test -tags hwtest_global ./input   # VM only
 ```
 
 ## ABI
+
+Windows: every call is a plain stdcall through `syscall`'s lazy DLLs. The
+structs passed by pointer (`INPUT`, `GUITHREADINFO`) are laid out with Go's
+alignment, which matches C on every Windows `GOARCH`; `TestStructLayout` pins
+their sizes. The one struct passed by value is `WindowFromPoint`'s 8-byte
+`POINT`, which both Win64 conventions pass in one integer register (x in the
+low half), so it is packed into a `uintptr`; on 386 it is two stack slots.
+
+macOS:
 
 `CGPoint` is passed and returned by value (`CGEventCreateMouseEvent`,
 `CGEventSetLocation`, `CGEventGetLocation`): two doubles in `d0`/`d1` on arm64,
@@ -141,7 +223,7 @@ darwin/arm64, which purego does not do.
 
 ```bash
 go test ./input                  # unit tests, post nothing
-go test -tags hwtest ./input     # drive testwin in the background; needs Accessibility
+go test -tags hwtest ./input     # drive testwin in the background; needs Accessibility on macOS
 ```
 
 ## Example
